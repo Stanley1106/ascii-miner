@@ -24,4 +24,7 @@ void mg_set_send_fragment(int delay_us);
  * 1 ok, 0 peer closed, -1 socket error, -2 timeout, -3 protocol error. */
 int mg_recv_msg(int fd, mg_reader *r, mg_msg *m, int timeout_ms);
 
+/* Monotonic clock in milliseconds. */
+long mg_now_ms(void);
+
 #endif

@@ -105,7 +105,7 @@ int mg_send_msg(int fd, uint8_t type, uint32_t seq, const void *payload, uint32_
     return mg_send_all(fd, frame, MG_HDR_LEN + len) < 0 ? -1 : 0;
 }
 
-static long now_ms(void)
+long mg_now_ms(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -114,14 +114,14 @@ static long now_ms(void)
 
 int mg_recv_msg(int fd, mg_reader *r, mg_msg *m, int timeout_ms)
 {
-    long deadline = now_ms() + timeout_ms;
+    long deadline = mg_now_ms() + timeout_ms;
     for (;;) {
         int rc = mg_reader_next(r, m);
         if (rc == 1)
             return 1;
         if (rc < 0)
             return -3;
-        long left = deadline - now_ms();
+        long left = deadline - mg_now_ms();
         if (left <= 0)
             return -2;
         struct pollfd pf = { .fd = fd, .events = POLLIN };
