@@ -3,3 +3,4 @@ build-debug/
 logs/
 *.o
 *.pcap
+miner_client.log
