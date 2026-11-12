@@ -28,7 +28,10 @@ CLIENT := $(BUILD)/miner_client
 # Both executables link the shared library; rpath=$ORIGIN finds it next to them.
 LINK_LIB := -L$(BUILD) -lminer -Wl,-rpath,'$$ORIGIN'
 
-.PHONY: all clean
+TEST_SRC   := $(wildcard tests/test_*.c)
+TEST_BIN   := $(TEST_SRC:tests/%.c=$(BUILD)/tests/%)
+
+.PHONY: all clean test
 all: $(LIB) $(if $(SERVER_SRC),$(SERVER)) $(if $(CLIENT_SRC),$(CLIENT))
 
 $(LIB): $(LIB_OBJ)
@@ -48,6 +51,15 @@ $(BUILD)/lib/%.o: lib/%.c
 $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
+
+# Unit tests link the same shared library as client/server.
+$(BUILD)/tests/%: tests/%.c $(LIB)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -o $@ $< -L$(BUILD) -lminer -Wl,-rpath,'$$ORIGIN/..' $(LDFLAGS)
+
+test: all $(TEST_BIN)
+	@set -e; for t in $(TEST_BIN); do $$t; done
+	@if [ -x tests/e2e.sh ]; then BUILD=$(BUILD) tests/e2e.sh; fi
 
 clean:
 	rm -rf build build-debug
