@@ -12,6 +12,7 @@
 #include "game.h"
 #include "log.h"
 #include "net.h"
+#include "sysinfo.h"
 
 #define TICK_MS 100
 #define HELLO_TIMEOUT_MS 5000
@@ -90,6 +91,13 @@ static int do_inventory(session_t *s, const mg_msg *m)
     return mg_send_msg(s->fd, MSG_INV_RESP, m->seq, out, sizeof out);
 }
 
+static int do_sysinfo(session_t *s, const mg_msg *m)
+{
+    char text[2048];
+    size_t n = build_sysinfo(s->w, text, sizeof text);
+    return mg_send_msg(s->fd, MSG_SYSINFO_RESP, m->seq, text, (uint32_t)n);
+}
+
 /* Returns 0 to keep going, 1 to close the session normally, -1 on I/O error. */
 static int handle(session_t *s, const mg_msg *m)
 {
@@ -98,6 +106,7 @@ static int handle(session_t *s, const mg_msg *m)
     case MSG_MOVE:    return do_move(s, m) < 0 ? -1 : 0;
     case MSG_DIG:     return do_dig(s, m) < 0 ? -1 : 0;
     case MSG_INV_REQ: return do_inventory(s, m) < 0 ? -1 : 0;
+    case MSG_SYSINFO_REQ: return do_sysinfo(s, m) < 0 ? -1 : 0;
     case MSG_PING:    return mg_send_msg(s->fd, MSG_PONG, m->seq, NULL, 0) < 0 ? -1 : 0;
     case MSG_BYE:     return 1;
     default:

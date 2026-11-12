@@ -55,6 +55,7 @@ $(BUILD)/%.o: %.c
 # Unit tests link the same shared library as client/server; some also
 # compile in a server module (TEST_EXTRA_<name>).
 TEST_EXTRA_test_world := server/world.c
+TEST_EXTRA_test_sysinfo := server/sysinfo.c server/world.c
 
 .SECONDEXPANSION:
 $(BUILD)/tests/%: tests/%.c $(LIB) $$(TEST_EXTRA_$$*)
