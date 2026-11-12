@@ -31,7 +31,7 @@ LINK_LIB := -L$(BUILD) -lminer -Wl,-rpath,'$$ORIGIN'
 TEST_SRC   := $(wildcard tests/test_*.c)
 TEST_BIN   := $(TEST_SRC:tests/%.c=$(BUILD)/tests/%)
 
-.PHONY: all clean test
+.PHONY: all clean test e2e
 all: $(LIB) $(if $(wildcard server/main.c),$(SERVER)) $(if $(wildcard client/main.c),$(CLIENT))
 
 $(LIB): $(LIB_OBJ)
@@ -64,7 +64,10 @@ $(BUILD)/tests/%: tests/%.c $(LIB) $$(TEST_EXTRA_$$*)
 
 test: all $(TEST_BIN)
 	@set -e; for t in $(TEST_BIN); do $$t; done
-	@if [ -x tests/e2e.sh ]; then BUILD=$(BUILD) tests/e2e.sh; fi
+
+# End-to-end: real server + bots, runs every with/without demo (~1 min).
+e2e: all
+	BUILD=$(BUILD) tests/e2e.sh
 
 clean:
 	rm -rf build build-debug
