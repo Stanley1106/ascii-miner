@@ -40,6 +40,8 @@ static void usage(const char *prog)
         "      --no-lock          do not lock digs (ore can be duplicated)\n"
         "      --no-robust        plain mutex (dead owner deadlocks everyone)\n"
         "      --no-reap          never waitpid() children (zombies pile up)\n"
+        "      --idle-timeout S   drop clients silent for S seconds (default 15)\n"
+        "      --no-timeout       never drop idle clients\n"
         " test hooks:\n"
         "      --dig-delay-us N   simulated dig work inside the critical section\n"
         "      --crash-at-dig N   the Nth dig SIGKILLs its child inside the lock\n",
@@ -86,9 +88,10 @@ int main(int argc, char **argv)
         .world = { .w = 120, .h = 40, .seed = (uint32_t)time(NULL), .max_players = MAX_PLAYERS,
                    .use_lock = 1, .robust = 1 },
         .reap = 1,
+        .idle_timeout = 15,
     };
     int cli_level = -1, verbose = 0;
-    enum { O_LOGLEVEL = 256, O_NOLOCK, O_NOROBUST, O_NOREAP, O_DIGDELAY, O_CRASH };
+    enum { O_LOGLEVEL = 256, O_NOLOCK, O_NOROBUST, O_NOREAP, O_DIGDELAY, O_CRASH, O_IDLE, O_NOTIMEOUT };
     static const struct option longopts[] = {
         { "port", required_argument, 0, 'p' },
         { "width", required_argument, 0, 'W' },
@@ -102,6 +105,8 @@ int main(int argc, char **argv)
         { "no-lock", no_argument, 0, O_NOLOCK },
         { "no-robust", no_argument, 0, O_NOROBUST },
         { "no-reap", no_argument, 0, O_NOREAP },
+        { "idle-timeout", required_argument, 0, O_IDLE },
+        { "no-timeout", no_argument, 0, O_NOTIMEOUT },
         { "dig-delay-us", required_argument, 0, O_DIGDELAY },
         { "crash-at-dig", required_argument, 0, O_CRASH },
         { 0, 0, 0, 0 },
@@ -125,6 +130,8 @@ int main(int argc, char **argv)
         case O_NOLOCK:   opt.world.use_lock = 0; break;
         case O_NOROBUST: opt.world.robust = 0; break;
         case O_NOREAP:   opt.reap = 0; break;
+        case O_IDLE:      opt.idle_timeout = atoi(optarg); break;
+        case O_NOTIMEOUT: opt.idle_timeout = 0; break;
         case O_DIGDELAY: opt.world.dig_delay_us = atoi(optarg); break;
         case O_CRASH:    opt.world.crash_at_dig = (uint32_t)strtoul(optarg, NULL, 10); break;
         default: usage(argv[0]); return c == 'h' ? 0 : 2;
@@ -171,7 +178,8 @@ int main(int argc, char **argv)
         signal(SIGCHLD, SIG_DFL);
         LOG_WARN("robustness OFF: children will not be reaped");
     }
-    LOG_INFO("listening on port %u (pid %d) reap=%s", opt.port, getpid(), opt.reap ? "on" : "off");
+    LOG_INFO("listening on port %u (pid %d) reap=%s idle_timeout=%ds", opt.port, getpid(),
+             opt.reap ? "on" : "off", opt.idle_timeout);
 
     pid_t parent = getpid();
     uint64_t last_req = 0;

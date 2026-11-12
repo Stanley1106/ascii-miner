@@ -29,6 +29,7 @@ typedef struct {
     uint32_t sent_version;   /* world version of the last snapshot pushed */
     long last_snapshot_ms;
     int snapshot_sent;
+    long last_recv_ms;       /* for the idle timeout */
 } session_t;
 
 static mg_reader g_reader;
@@ -181,6 +182,7 @@ void session_run(int fd, world_t *w, const server_opts *opt)
     mg_reader_init(&g_reader);
     if (handshake(&s) < 0)
         goto out;
+    s.last_recv_ms = mg_now_ms();
 
     const char *reason = "client quit";
     for (;;) {
@@ -191,6 +193,7 @@ void session_run(int fd, world_t *w, const server_opts *opt)
             break;
         }
         if (pr > 0) {
+            s.last_recv_ms = mg_now_ms();
             int n = mg_reader_fill(&g_reader, fd);
             if (n == 0) {
                 reason = "connection closed by peer";
@@ -218,6 +221,14 @@ void session_run(int fd, world_t *w, const server_opts *opt)
             }
             if (done)
                 break;
+        }
+        /* Robustness #4: a frozen/vanished client (no FIN ever arrives)
+         * would otherwise hold this process and its slot forever. */
+        if (opt->idle_timeout > 0 && mg_now_ms() - s.last_recv_ms > opt->idle_timeout * 1000L) {
+            STAT_ADD(w->st.timeouts, 1);
+            send_error(&s, 0, ERR_TIMEOUT, "idle timeout");
+            reason = "idle timeout";
+            break;
         }
         if (maybe_snapshot(&s) < 0) {
             reason = "send failed";
