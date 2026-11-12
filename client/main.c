@@ -85,6 +85,8 @@ int main(int argc, char **argv)
         o.name = o.bot ? "bot" : getenv("USER") ? getenv("USER") : "player";
     if (o.bot)
         return bot_run(&o);
-    fprintf(stderr, "interactive mode not implemented yet; use --bot\n");
-    return 2;
+    /* the terminal belongs to the game screen, so logs go to a file */
+    if (!log_file && mg_log_set_file("miner_client.log") < 0)
+        perror("miner_client.log");
+    return ui_run(&o);
 }
