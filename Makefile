@@ -32,7 +32,7 @@ TEST_SRC   := $(wildcard tests/test_*.c)
 TEST_BIN   := $(TEST_SRC:tests/%.c=$(BUILD)/tests/%)
 
 .PHONY: all clean test
-all: $(LIB) $(if $(SERVER_SRC),$(SERVER)) $(if $(CLIENT_SRC),$(CLIENT))
+all: $(LIB) $(if $(wildcard server/main.c),$(SERVER)) $(if $(wildcard client/main.c),$(CLIENT))
 
 $(LIB): $(LIB_OBJ)
 	$(CC) -shared -o $@ $^ $(LDFLAGS)
@@ -52,10 +52,14 @@ $(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
 
-# Unit tests link the same shared library as client/server.
-$(BUILD)/tests/%: tests/%.c $(LIB)
+# Unit tests link the same shared library as client/server; some also
+# compile in a server module (TEST_EXTRA_<name>).
+TEST_EXTRA_test_world := server/world.c
+
+.SECONDEXPANSION:
+$(BUILD)/tests/%: tests/%.c $(LIB) $$(TEST_EXTRA_$$*)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -o $@ $< -L$(BUILD) -lminer -Wl,-rpath,'$$ORIGIN/..' $(LDFLAGS)
+	$(CC) $(CFLAGS) -Iserver -o $@ $< $(TEST_EXTRA_$*) -L$(BUILD) -lminer -Wl,-rpath,'$$ORIGIN/..' $(LDFLAGS)
 
 test: all $(TEST_BIN)
 	@set -e; for t in $(TEST_BIN); do $$t; done
