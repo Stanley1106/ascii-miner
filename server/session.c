@@ -26,6 +26,9 @@ typedef struct {
     uint32_t inv[ORE_COUNT]; /* per-connection inventory, lives in this child only */
     uint32_t total_value;
     uint32_t digs;
+    uint32_t sent_version;   /* world version of the last snapshot pushed */
+    long last_snapshot_ms;
+    int snapshot_sent;
 } session_t;
 
 static mg_reader g_reader;
@@ -117,6 +120,23 @@ static int handle(session_t *s, const mg_msg *m)
     }
 }
 
+/* Push the world view when it changed, at most once per tick. */
+static int maybe_snapshot(session_t *s)
+{
+    static uint8_t buf[MG_MAX_PAYLOAD];
+    if (!s->want_snapshot)
+        return 0;
+    long now = mg_now_ms();
+    uint32_t v = __atomic_load_n(&s->w->version, __ATOMIC_ACQUIRE);
+    if (s->snapshot_sent && (v == s->sent_version || now - s->last_snapshot_ms < TICK_MS))
+        return 0;
+    size_t n = world_snapshot(s->w, buf, sizeof buf);
+    s->sent_version = v;
+    s->last_snapshot_ms = now;
+    s->snapshot_sent = 1;
+    return mg_send_msg(s->fd, MSG_SNAPSHOT, 0, buf, (uint32_t)n);
+}
+
 static int handshake(session_t *s)
 {
     int rc = mg_recv_msg(s->fd, &g_reader, &g_msg, HELLO_TIMEOUT_MS);
@@ -198,6 +218,10 @@ void session_run(int fd, world_t *w, const server_opts *opt)
             }
             if (done)
                 break;
+        }
+        if (maybe_snapshot(&s) < 0) {
+            reason = "send failed";
+            break;
         }
     }
     LOG_INFO("slot %d leaving: %s (digs=%u value=%u)", s.slot, reason, s.digs, s.total_value);
