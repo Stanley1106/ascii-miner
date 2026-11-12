@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -138,9 +139,80 @@ static int maybe_snapshot(session_t *s)
     return mg_send_msg(s->fd, MSG_SNAPSHOT, 0, buf, (uint32_t)n);
 }
 
+/* Robustness #3 OFF (--naive-recv): the classic bug of assuming that one
+ * recv() returns exactly one complete frame. A frame split across several
+ * TCP segments is parsed from a half-filled buffer, and extra frames that
+ * arrive together are silently dropped.
+ * 1 ok, 0 closed, -1 error, -3 protocol error. */
+static int naive_recv(int fd, mg_msg *m)
+{
+    static uint8_t buf[MG_HDR_LEN + MG_MAX_PAYLOAD];
+    memset(buf, 0, MG_HDR_LEN);
+    ssize_t n = recv(fd, buf, sizeof buf, 0);
+    if (n <= 0)
+        return n == 0 ? 0 : -1;
+    LOG_DEBUG("naive recv got %zd bytes", n);
+    if (mg_decode_header(buf, &m->type, &m->seq, &m->len) < 0)
+        return -3;
+    memcpy(m->payload, buf + MG_HDR_LEN, m->len);
+    return 1;
+}
+
+/* Robust path: buffer bytes and dispatch every complete frame.
+ * Returns 1 when the session should end. */
+static int read_framed(session_t *s, const char **reason)
+{
+    int n = mg_reader_fill(&g_reader, s->fd);
+    if (n == 0) {
+        *reason = "connection closed by peer";
+        return 1;
+    }
+    if (n < 0) {
+        *reason = strerror(errno);
+        return 1;
+    }
+    int rc;
+    while ((rc = mg_reader_next(&g_reader, &g_msg)) == 1) {
+        int h = handle(s, &g_msg);
+        if (h != 0) {
+            *reason = h < 0 ? "send failed" : "client quit";
+            return 1;
+        }
+    }
+    if (rc < 0) {
+        STAT_ADD(s->w->st.errors, 1);
+        send_error(s, 0, ERR_PROTOCOL, "malformed frame");
+        *reason = "protocol error";
+        return 1;
+    }
+    return 0;
+}
+
+static int read_naive(session_t *s, const char **reason)
+{
+    int rc = naive_recv(s->fd, &g_msg);
+    if (rc == 0 || rc == -1) {
+        *reason = rc == 0 ? "connection closed by peer" : strerror(errno);
+        return 1;
+    }
+    if (rc == -3) {
+        STAT_ADD(s->w->st.errors, 1);
+        send_error(s, 0, ERR_PROTOCOL, "malformed frame");
+        *reason = "protocol error (naive recv)";
+        return 1;
+    }
+    int h = handle(s, &g_msg);
+    if (h != 0) {
+        *reason = h < 0 ? "send failed" : "client quit";
+        return 1;
+    }
+    return 0;
+}
+
 static int handshake(session_t *s)
 {
-    int rc = mg_recv_msg(s->fd, &g_reader, &g_msg, HELLO_TIMEOUT_MS);
+    int rc = s->opt->naive_recv ? naive_recv(s->fd, &g_msg)
+                                : mg_recv_msg(s->fd, &g_reader, &g_msg, HELLO_TIMEOUT_MS);
     if (rc != 1 || g_msg.type != MSG_HELLO || g_msg.len < 1 + MG_NAME_LEN) {
         LOG_WARN("handshake failed (rc=%d type=0x%02x)", rc, rc == 1 ? g_msg.type : 0);
         STAT_ADD(s->w->st.errors, 1);
@@ -194,32 +266,8 @@ void session_run(int fd, world_t *w, const server_opts *opt)
         }
         if (pr > 0) {
             s.last_recv_ms = mg_now_ms();
-            int n = mg_reader_fill(&g_reader, fd);
-            if (n == 0) {
-                reason = "connection closed by peer";
-                break;
-            }
-            if (n < 0) {
-                reason = strerror(errno);
-                break;
-            }
-            int rc, done = 0;
-            while ((rc = mg_reader_next(&g_reader, &g_msg)) == 1) {
-                int h = handle(&s, &g_msg);
-                if (h != 0) {
-                    done = 1;
-                    if (h < 0)
-                        reason = "send failed";
-                    break;
-                }
-            }
-            if (rc < 0) {
-                STAT_ADD(w->st.errors, 1);
-                send_error(&s, 0, ERR_PROTOCOL, "malformed frame");
-                reason = "protocol error";
-                break;
-            }
-            if (done)
+            int stop = opt->naive_recv ? read_naive(&s, &reason) : read_framed(&s, &reason);
+            if (stop)
                 break;
         }
         /* Robustness #4: a frozen/vanished client (no FIN ever arrives)

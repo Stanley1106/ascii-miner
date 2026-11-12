@@ -40,6 +40,7 @@ static void usage(const char *prog)
         "      --no-lock          do not lock digs (ore can be duplicated)\n"
         "      --no-robust        plain mutex (dead owner deadlocks everyone)\n"
         "      --no-reap          never waitpid() children (zombies pile up)\n"
+        "      --naive-recv       assume one recv() == one frame (no reassembly)\n"
         "      --idle-timeout S   drop clients silent for S seconds (default 15)\n"
         "      --no-timeout       never drop idle clients\n"
         " test hooks:\n"
@@ -91,7 +92,7 @@ int main(int argc, char **argv)
         .idle_timeout = 15,
     };
     int cli_level = -1, verbose = 0;
-    enum { O_LOGLEVEL = 256, O_NOLOCK, O_NOROBUST, O_NOREAP, O_DIGDELAY, O_CRASH, O_IDLE, O_NOTIMEOUT };
+    enum { O_LOGLEVEL = 256, O_NOLOCK, O_NOROBUST, O_NOREAP, O_DIGDELAY, O_CRASH, O_IDLE, O_NOTIMEOUT, O_NAIVE };
     static const struct option longopts[] = {
         { "port", required_argument, 0, 'p' },
         { "width", required_argument, 0, 'W' },
@@ -105,6 +106,7 @@ int main(int argc, char **argv)
         { "no-lock", no_argument, 0, O_NOLOCK },
         { "no-robust", no_argument, 0, O_NOROBUST },
         { "no-reap", no_argument, 0, O_NOREAP },
+        { "naive-recv", no_argument, 0, O_NAIVE },
         { "idle-timeout", required_argument, 0, O_IDLE },
         { "no-timeout", no_argument, 0, O_NOTIMEOUT },
         { "dig-delay-us", required_argument, 0, O_DIGDELAY },
@@ -130,6 +132,7 @@ int main(int argc, char **argv)
         case O_NOLOCK:   opt.world.use_lock = 0; break;
         case O_NOROBUST: opt.world.robust = 0; break;
         case O_NOREAP:   opt.reap = 0; break;
+        case O_NAIVE:     opt.naive_recv = 1; break;
         case O_IDLE:      opt.idle_timeout = atoi(optarg); break;
         case O_NOTIMEOUT: opt.idle_timeout = 0; break;
         case O_DIGDELAY: opt.world.dig_delay_us = atoi(optarg); break;
@@ -178,8 +181,8 @@ int main(int argc, char **argv)
         signal(SIGCHLD, SIG_DFL);
         LOG_WARN("robustness OFF: children will not be reaped");
     }
-    LOG_INFO("listening on port %u (pid %d) reap=%s idle_timeout=%ds", opt.port, getpid(),
-             opt.reap ? "on" : "off", opt.idle_timeout);
+    LOG_INFO("listening on port %u (pid %d) reap=%s idle_timeout=%ds recv=%s", opt.port,
+             getpid(), opt.reap ? "on" : "off", opt.idle_timeout, opt.naive_recv ? "naive" : "framed");
 
     pid_t parent = getpid();
     uint64_t last_req = 0;
